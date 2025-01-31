@@ -49,7 +49,7 @@ public class TrackedGame
         
         var fileInfo = new FileInfo(trnFile);
         Regex ageAndNationRegex = new Regex(@"^(?<Age>early|mid|late+)_(?<Nation>[a-z]+)\.trn$");
-        var match = ageAndNationRegex.Match(fileInfo.Name.Remove(fileInfo.Name.Length - fileInfo.Extension.Length, fileInfo.Extension.Length));
+        var match = ageAndNationRegex.Match(fileInfo.Name);
         Age = match.Groups["Age"].Value;
         Nation = match.Groups["Nation"].Value;
 
@@ -85,11 +85,6 @@ public class TrackedGame
     public void CheckForNewSave(string pathToGameSaves, string pathToBackups)
     {
         FileInfo domSave = new FileInfo(Path.Combine(pathToGameSaves, GameName, TrnFile));
-
-        if (GameName == "ex")
-        {
-            Console.Write($"DEBUG: LWT is {LastWriteTime.Value.ToString()} || New LWT is {domSave.LastWriteTime.ToString()}");
-        }
         
         if (domSave.LastWriteTime > LastWriteTime)
         {
