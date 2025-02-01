@@ -7,8 +7,6 @@ namespace Dom6SaveScummer;
 
 // TODO: Handle 2h file properly 
 
-// TODO: Read appsettings from scummersettings.json instead of hardcoded values
-
 // TODO: Make it not break if a backup folder has folders in it with names that don't parse to ints
 
 // TODO: Make it not break if a backup folder has a folder in it without a save

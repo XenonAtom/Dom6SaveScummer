@@ -10,19 +10,8 @@ public class Scummer
 
     public Scummer()
     {
-        string json =
-            $"{{\n  \"SavedGamesDirectory\": \"C:\\\\Users\\\\culha\\\\AppData\\\\Roaming\\\\Dominions6\\\\savedgames\\\\\",\n  \"BackupDirectory\": \"C:\\\\temp\\\\Dom6SaveBackups\",\n  \"NewFileCheckFrequencyInSeconds\": 20\n}}";
-        
-        try
+        if (!ReadSettings())
         {
-            _settings = JsonConvert.DeserializeObject<ScummerSettings>(json);
-        }
-        catch (Exception e)
-        {
-            Console.WriteLine("Failed to deserialize scummersettings.json."); 
-            Console.WriteLine("Make sure it is named 'scummersettings.json', located in the directory this program runs in, and has proper values.");
-            Console.WriteLine(e.ToString());
-            Console.ReadLine();
             return;
         }
 
@@ -40,6 +29,37 @@ public class Scummer
         
 
         _timer = new Timer(TimerCallback, null, 0, _settings.NewFileCheckFrequencyInSeconds * 1000);
+    }
+
+    bool ReadSettings()
+    {
+        try
+        {
+            using (StreamReader sr = new StreamReader("scummersettings.json"))
+            {
+                string text = sr.ReadToEnd();
+                try
+                {
+                    _settings = JsonConvert.DeserializeObject<ScummerSettings>(text);
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine("Failed to deserialize scummersettings.json."); 
+                    Console.WriteLine(@"If paths use the backslash '\' make sure to double them up ('\\')");
+                    Console.WriteLine(e.ToString());
+                    Console.ReadLine();
+                    return false;
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine("Error reading scummersettings.json. Ensure it is named 'scummersettings.json' and located in the directory this program runs in.");
+            Console.WriteLine(e);
+            return false;
+        }
+
+        return true;
     }
 
     void TimerCallback(Object o)
