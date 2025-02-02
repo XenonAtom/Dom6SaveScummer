@@ -1,5 +1,5 @@
 {
   "SavedGamesDirectory": "C:\\Users\\culha\\AppData\\Roaming\\Dominions6\\savedgames\\",
   "BackupDirectory": "C:\\temp\\Dom6SaveBackups",
-  "NewFileCheckFrequencyInMinutes": 2
+  "CopyMapFiles": true
 }

@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Newtonsoft.Json;
 
 namespace Dom6SaveScummer;
@@ -5,8 +6,8 @@ namespace Dom6SaveScummer;
 public class Scummer
 {
     ScummerSettings _settings;
-    static List<TrackedGame> _trackedGames = new List<TrackedGame>();
-    private Timer _timer = null;
+    private FileSystemWatcher _watcher;
+    private Regex _trnFileParseRegex;
 
     public Scummer()
     {
@@ -15,20 +16,107 @@ public class Scummer
             return;
         }
 
-        // newlords directory is where Dominions 6 stores pretenders created in the Game Tools rather than for a specific game - ignore the folder
-        var gameSavesFound = Directory.GetDirectories(_settings.SavedGamesDirectory).Where(x => new DirectoryInfo(x).Name.ToLower() != "newlords").ToList();
+        string separator = Path.DirectorySeparatorChar == '\\' ? @"\\" : $"{Path.DirectorySeparatorChar}";
+        _trnFileParseRegex = new Regex($@"^.*\\(?<GameName>[^{separator}]+){separator}(?<TrnFile>(early|mid|late)_[a-z]+\.trn)$");
 
-        if (gameSavesFound.Any())
+        _watcher = new FileSystemWatcher(_settings.SavedGamesDirectory);
+        _watcher.NotifyFilter = NotifyFilters.CreationTime | NotifyFilters.FileName | NotifyFilters.LastWrite;
+        _watcher.IncludeSubdirectories = true;
+        _watcher.Changed += OnChanged;
+        _watcher.Created += OnCreated;
+        _watcher.Filter = "*.trn";
+        _watcher.EnableRaisingEvents = true;
+    }
+
+    private void OnCreated(object sender, FileSystemEventArgs e)
+    {
+        if (e.ChangeType != WatcherChangeTypes.Created)
         {
-            foreach (var dir in gameSavesFound)
+            return;
+        }
+
+        CopyGameSave(e.FullPath);
+    }
+
+    private void OnChanged(object sender, FileSystemEventArgs e)
+    {
+        if (e.ChangeType != WatcherChangeTypes.Changed)
+        {
+            return;
+        }
+
+        CopyGameSave(e.FullPath);
+    }
+
+    private void CopyGameSave(string pathToGameSave)
+    {
+        var match = _trnFileParseRegex.Match(pathToGameSave);
+        
+        if (!Directory.Exists(Path.Combine(_settings.BackupDirectory, match.Groups["GameName"].Value)))
+        {
+            Directory.CreateDirectory(Path.Combine(_settings.BackupDirectory, match.Groups["GameName"].Value));
+            if (_settings.CopyMapFiles)
             {
-                var di = new DirectoryInfo(dir);
-                _trackedGames.Add(new TrackedGame(di.Name, _settings.SavedGamesDirectory, _settings.BackupDirectory));
+                var toCopy = Directory.GetFiles(Path.Combine(_settings.SavedGamesDirectory, match.Groups["GameName"].Value))
+                                                .Where(x => !x.ToLower().EndsWith(".trn") && !x.ToLower().EndsWith(".2h"))
+                                                .Select(y => new FileInfo(y)).ToList();
+                foreach (var f in toCopy)
+                {
+                    File.Copy(f.FullName, Path.Combine(_settings.BackupDirectory, match.Groups["GameName"].Value, f.Name));
+                }
+            }
+            Console.WriteLine($"Backup directory created for game '{match.Groups["GameName"].Value}'");
+        }
+
+        var latestBackupNum = HighestBackupNumberForTurnFile(match.Groups["GameName"].Value, match.Groups["TrnFile"].Value);
+        
+        // FileSystemWatcher triggers multiple times on a new turn so we want to ignore if this is not the first event for a new turn
+        // Adding a second to the last write time of the backup because I was seeing inconsistent results on whether it thought the copied backup
+        //      was newer. Seems like some sort of precision issue with GetLastWriteTime? 
+        if (latestBackupNum.HasValue && 
+            File.GetLastWriteTime(pathToGameSave) <=
+            File.GetLastWriteTime(Path.Combine(_settings.BackupDirectory,
+                match.Groups["GameName"].Value,
+                $"{latestBackupNum}",
+                match.Groups["TrnFile"].Value)).AddSeconds(1))
+        { 
+            return;
+        }
+
+        latestBackupNum = latestBackupNum.HasValue ? ++latestBackupNum : 0;
+        Directory.CreateDirectory(Path.Combine(_settings.BackupDirectory, match.Groups["GameName"].Value, $"{latestBackupNum}"));
+        File.Copy(pathToGameSave, Path.Combine(_settings.BackupDirectory,
+                                                                        match.Groups["GameName"].Value,
+                                                                        $"{latestBackupNum}",
+                                                                        match.Groups["TrnFile"].Value));
+        Console.WriteLine($"Backup #{latestBackupNum.Value} created for game '{match.Groups["GameName"]}");
+    }
+
+    private int? HighestBackupNumberForTurnFile(string gameName, string trnFile)
+    {
+        if (!Directory.Exists(Path.Combine(_settings.BackupDirectory, gameName)))
+        {
+            return null;
+        }
+        var subDirs = Directory.GetDirectories(Path.Combine(_settings.BackupDirectory, gameName)).ToList();
+        if (!subDirs.Any())
+        {
+            return null;
+        }
+
+        int highest = -1;
+        int newNum = -2;
+        foreach (var dir in subDirs)
+        {
+            if (Int32.TryParse(new DirectoryInfo(dir).Name, out newNum) && 
+                newNum > highest && 
+                File.Exists(Path.Combine(_settings.BackupDirectory, gameName, $"{newNum}", trnFile)))
+            {
+                highest = newNum;
             }
         }
-        
 
-        _timer = new Timer(TimerCallback, null, 0, _settings.NewFileCheckFrequencyInSeconds * 1000);
+        return highest > -1 ? highest : null;
     }
 
     bool ReadSettings()
@@ -60,37 +148,5 @@ public class Scummer
         }
 
         return true;
-    }
-
-    void TimerCallback(Object o)
-    {
-        Console.WriteLine($"Checking for new saves...");
-
-        var foundGames = Directory.GetDirectories(_settings.SavedGamesDirectory).Select(x => new DirectoryInfo(x).Name).Where(y => y.ToLower() != "newlords");
-        var newGames = foundGames.Where(x => _trackedGames.All(y => y.GameName != x)).ToList();
-        var lostGames = _trackedGames.Where(x => !foundGames.Contains(x.GameName)).ToList();
-        
-        if (lostGames.Any())
-        {
-            foreach (var lost in lostGames)
-            {
-                Console.WriteLine($"Game '{lost.GameName}' no longer exists in directory of Dominions 6 saved games - deleting backups");
-                Directory.Delete(Path.Combine(_settings.BackupDirectory, lost.GameName), true);
-                _trackedGames.Remove(lost);
-            }
-        }
-
-        foreach (var game in _trackedGames)
-        {
-            game.CheckForNewSave(_settings.SavedGamesDirectory, _settings.BackupDirectory);
-        }
-
-        if (newGames.Any())
-        {
-            foreach (var ng in newGames)
-            {
-                _trackedGames.Add(new TrackedGame(ng, _settings.SavedGamesDirectory, _settings.BackupDirectory));
-            }
-        }
     }
 }
